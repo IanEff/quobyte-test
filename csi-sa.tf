@@ -18,6 +18,13 @@ resource "google_project_iam_member" "pd_csi_storage" {
   member  = "serviceAccount:${google_service_account.pd_csi.email}"
 }
 
+# The driver needs compute.instances.get/attachDisk/detachDisk permissions to attach disks to VMs.
+resource "google_project_iam_member" "pd_csi_instance_admin" {
+  project = var.project_id
+  role    = "roles/compute.instanceAdmin.v1"
+  member  = "serviceAccount:${google_service_account.pd_csi.email}"
+}
+
 # Impersonate node service accounts to attach disks to them.
 resource "google_service_account_iam_member" "pd_csi_impersonate_nodes" {
   service_account_id = "projects/${var.project_id}/serviceAccounts/${local.node_service_account}"
