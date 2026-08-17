@@ -1,0 +1,32 @@
+quobyte:
+  storageProvisioner: pd.csi.storage.gke.io
+  flashStorage: pd-standard
+
+  replicas:
+    registry: 3
+    data: 3
+    metadata: 3
+    api: 2
+    webconsole: 1
+    s3: 1
+
+  datadisks:
+    - name: data0
+      mountpoint: /var/lib/quobyte/devices/data0
+      size: "100Gi"
+  metadatadisks:
+    - name: metadata0
+      mountpoint: /var/lib/quobyte/devices/metadata0
+      size: "100Gi"
+
+  s3:
+    enabled: false
+    dnsname: s3.quobyte-test.lab
+
+  lbinternal: false
+  webconsoleport: 8080
+  image: quay.io/quobyte/quobyte-server:4
+  maxopenfiles: "1048576"
+  maxprocs: "16384"
+
+hostNetwork: false

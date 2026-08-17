@@ -1,0 +1,38 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: pd-csi-probe
+provisioner: pd.csi.storage.gke.io
+parameters:
+  type: pd-standard
+volumeBindingMode: WaitForFirstConsumer
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: quobyte-minsize-probe
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: pd-csi-probe
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: qmkdev-probe
+spec:
+  restartPolicy: Never
+  volumes:
+    - name: device-disk
+      persistentVolumeClaim:
+        claimName: quobyte-minsize-probe
+  containers:
+    - name: probe
+      image: quay.io/quobyte/quobyte-server:4
+      command: ["/bin/bash", "-c", "/usr/bin/qmkdev -d -t DATA /var/lib/quobyte/devices/data0 && echo 'PROBE_SUCCESS' && sleep 3600"]
+      volumeMounts:
+        - name: device-disk
+          mountPath: /var/lib/quobyte/devices/data0

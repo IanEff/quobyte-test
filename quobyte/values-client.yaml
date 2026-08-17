@@ -1,0 +1,9 @@
+quobyte:
+  registry: _quobyte._tcp.quobyte.quobyte.svc.cluster.local
+  clientImage: "quay.io/quobyte/quobyte-client:4"
+  clientVersion: "4"
+  clientMountPoint: "/home/quobyte/mounts"
+  volumeMountPoint: "/home/quobyte"
+  enableAccessKeys: "false"
+
+hostNetwork: false

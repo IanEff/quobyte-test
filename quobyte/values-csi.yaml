@@ -1,0 +1,7 @@
+quobyte:
+  version: 4
+  apiURL: http://quobyte-api.quobyte.svc.cluster.local:7860
+  clientMountPoint: /home/quobyte
+  csiProvisionerName: csi.quobyte.com
+  enableAccessKeyMounts: false
+  csiControllerReplicas: 1

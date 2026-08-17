@@ -1,0 +1,74 @@
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: quobyte
+provisioner: csi.quobyte.com
+parameters:
+  quobyteTenant: "My Tenant"
+  quobyteConfig: "BASE"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: quobyte-smoke
+  namespace: quobyte
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: quobyte
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quobyte-smoke-app
+  namespace: quobyte
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: quobyte-smoke
+  template:
+    metadata:
+      labels:
+        app: quobyte-smoke
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - quobyte-smoke
+                topologyKey: kubernetes.io/hostname
+      volumes:
+        - name: shared-vol
+          persistentVolumeClaim:
+            claimName: quobyte-smoke
+      containers:
+        - name: worker
+          image: busybox
+          command:
+            - /bin/sh
+            - -c
+            - |
+              POD_NAME=${HOSTNAME}
+              echo "Starting worker on pod ${POD_NAME}..."
+              echo "Hello from ${POD_NAME} at $(date)" > /mnt/quobyte/${POD_NAME}.txt
+              while true; do
+                echo "=== Files in /mnt/quobyte from ${POD_NAME} ==="
+                ls -la /mnt/quobyte/
+                for f in /mnt/quobyte/*.txt; do
+                  [ -f "$f" ] && echo "[$f]: $(cat "$f")"
+                done
+                sleep 5
+              done
+          volumeMounts:
+            - name: shared-vol
+              mountPath: /mnt/quobyte
