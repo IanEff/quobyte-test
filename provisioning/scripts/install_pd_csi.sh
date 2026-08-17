@@ -15,6 +15,12 @@ echo "════════════════════════�
 echo "  Deploying GCE PD CSI Driver            "
 echo "══════════════════════════════════════════"
 
+# Pre-create cluster-admin-binding to satisfy GKE check in deploy-driver.sh
+kubectl create clusterrolebinding cluster-admin-binding \
+    --clusterrole=cluster-admin \
+    --user=system:admin \
+    --dry-run=client -o yaml | kubectl apply -f -
+
 export GOPATH=/tmp/go
 export PKGDIR="${GOPATH}/src/sigs.k8s.io/gcp-compute-persistent-disk-csi-driver"
 mkdir -p "$(dirname "${PKGDIR}")"
