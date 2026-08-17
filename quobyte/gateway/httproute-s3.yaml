@@ -13,4 +13,4 @@ spec:
   rules:
     - backendRefs:
         - name: quobyte-s3
-          port: 8080
+          port: 80

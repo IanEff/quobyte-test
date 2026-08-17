@@ -20,7 +20,8 @@ quobyte:
       size: "30Gi"
 
   s3:
-    enabled: false
+    enabled: true
+    replicas: 1
     dnsname: s3.quobyte-test.lab
 
   lbinternal: false
