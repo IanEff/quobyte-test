@@ -13,11 +13,11 @@ quobyte:
   datadisks:
     - name: data0
       mountpoint: /var/lib/quobyte/devices/data0
-      size: "100Gi"
+      size: "30Gi"
   metadatadisks:
     - name: metadata0
       mountpoint: /var/lib/quobyte/devices/metadata0
-      size: "100Gi"
+      size: "30Gi"
 
   s3:
     enabled: false
