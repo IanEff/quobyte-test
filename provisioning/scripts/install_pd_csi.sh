@@ -9,18 +9,22 @@ echo "════════════════════════�
 echo "  Deploying GCE PD CSI Driver            "
 echo "══════════════════════════════════════════"
 
-rm -rf /tmp/pd-csi /tmp/pd-csi-creds
-git clone https://github.com/kubernetes-sigs/gcp-compute-persistent-disk-csi-driver /tmp/pd-csi
-cd /tmp/pd-csi
+export GOPATH=/tmp/go
+export PKGDIR="${GOPATH}/src/sigs.k8s.io/gcp-compute-persistent-disk-csi-driver"
+mkdir -p "$(dirname "${PKGDIR}")"
+rm -rf "${PKGDIR}"
+git clone https://github.com/kubernetes-sigs/gcp-compute-persistent-disk-csi-driver "${PKGDIR}"
 
 mkdir -p /tmp/pd-csi-creds
 echo "${PD_CSI_SA_KEY_B64}" | base64 -d > /tmp/pd-csi-creds/cloud-sa.json
 
+cd "${PKGDIR}"
+GOPATH=/tmp/go \
 GCE_PD_SA_DIR=/tmp/pd-csi-creds \
 GCE_PD_DRIVER_VERSION=stable-master \
-  ./deploy/kubernetes/deploy-driver.sh
+  ./deploy/kubernetes/deploy-driver.sh --skip-sa-check
 
 shred -u /tmp/pd-csi-creds/cloud-sa.json
-rm -rf /tmp/pd-csi-creds /tmp/pd-csi
+rm -rf /tmp/pd-csi-creds /tmp/go
 
 echo "✓ GCE PD CSI driver deployed successfully"

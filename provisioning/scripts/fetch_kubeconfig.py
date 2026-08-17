@@ -26,7 +26,7 @@ NEW_USER_NAME = "quobyte-test-admin"
 NEW_CLUSTER_NAME = "quobyte-test-cluster"
 
 KUBECONFIG_WAIT_TIMEOUT_S = 600
-KUBECONFIG_WAIT_INTERVAL_S = 10
+KUBECONFIG_WAIT_INTERVAL_S = 5
 
 
 def tofu_output(name: str) -> str:
@@ -68,7 +68,7 @@ def add() -> None:
     while True:
         attempt += 1
         result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode == 0 and result.stdout.strip() and "BEGIN CERTIFICATE" in result.stdout:
+        if result.returncode == 0 and "apiVersion: v1" in result.stdout and "clusters:" in result.stdout:
             break
         if time.time() >= deadline:
             print(f"Failed to fetch kubeconfig after {KUBECONFIG_WAIT_TIMEOUT_S}s "
