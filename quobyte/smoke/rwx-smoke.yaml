@@ -1,3 +1,13 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: quobyte-admin-secret
+  namespace: quobyte
+type: Opaque
+stringData:
+  user: "admin"
+  password: "quobyte"
+---
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
@@ -5,7 +15,12 @@ metadata:
 provisioner: csi.quobyte.com
 parameters:
   quobyteTenant: "My Tenant"
-  quobyteConfig: "BASE"
+  csi.storage.k8s.io/provisioner-secret-name: "quobyte-admin-secret"
+  csi.storage.k8s.io/provisioner-secret-namespace: "quobyte"
+  csi.storage.k8s.io/node-stage-secret-name: "quobyte-admin-secret"
+  csi.storage.k8s.io/node-stage-secret-namespace: "quobyte"
+  csi.storage.k8s.io/controller-expand-secret-name: "quobyte-admin-secret"
+  csi.storage.k8s.io/controller-expand-secret-namespace: "quobyte"
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim

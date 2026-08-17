@@ -32,6 +32,7 @@ helm upgrade --install cilium cilium/cilium \
     --namespace kube-system \
     --set k8sServiceHost="${CONTROL_PLANE_INTERNAL_IP}" \
     --set k8sServicePort="6443" \
+    --set kubeProxyReplacement=true \
     --set routingMode=tunnel \
     --set tunnelProtocol=vxlan \
     --set gatewayAPI.enabled=true \
