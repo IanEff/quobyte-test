@@ -3,6 +3,12 @@
 # Deploys the out-of-tree GCE PD CSI driver on k3s using the scoped service account key.
 set -euo pipefail
 
+if [ -f /etc/quobyte-test.env ]; then
+    set -a
+    source /etc/quobyte-test.env
+    set +a
+fi
+
 export KUBECONFIG=/root/.kube/config
 
 echo "══════════════════════════════════════════"
