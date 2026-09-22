@@ -35,9 +35,9 @@ variable "control_plane_machine_type" {
 }
 
 variable "node_machine_type" {
-  description = "Machine type for each k3s agent worker node."
+  description = "Machine type for each k3s agent worker node. e2-highmem-2 (16 GB) because Quobyte 5.1's S3 gateway needs a 10 GiB object cache, which an 8 GB e2-standard-2 can't fit. Same 2 vCPUs, so no quota change."
   type        = string
-  default     = "e2-standard-2"
+  default     = "e2-highmem-2"
 }
 
 variable "node_machine_type_overrides" {

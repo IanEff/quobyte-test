@@ -5,7 +5,7 @@ Throwaway GCP test sandbox running Quobyte Free Edition on raw-VM k3s to evaluat
 ## Architecture
 
 - **Infrastructure:** OpenTofu on Google Cloud Platform
-- **Topology:** 1× `e2-medium` control-plane + 3× `e2-standard-2` workers (total 8 E2 vCPUs) in `us-east1-b`
+- **Topology:** 1× `e2-medium` control-plane + 3× `e2-highmem-2` workers (2 vCPU / 16 GB each; total 8 E2 vCPUs) in `us-east1-b`
 - **Disks:** 100% `pd-standard` boot and CSI storage devices (0 GB SSD quota used)
 - **Kubernetes:** k3s channel `v1.34` (latest patch). This is the ceiling: `quobyte-cluster` chart 0.3.0 caps k8s below 1.35
 - **Networking:** Cilium 1.20.2 in VXLAN tunnel mode + hostNetwork Gateway API (CRDs v1.6.1) + Hubble Relay/UI
@@ -109,10 +109,10 @@ qm volume list
 
 ### S3 Gateway demo
 
-**Currently disabled** (`s3.enabled: false` in `values-cluster.yaml`). On
-Quobyte 5.1 the S3 gateway defaults to a 10 GiB object cache and crash-loops
-on 8 GB nodes ("Configured object cache size is too large"). Re-enable it on
-bigger workers. The steps below worked on 4.9.
+Quobyte 5.1's S3 gateway defaults to a 10 GiB object cache and crash-loops
+on 8 GB nodes ("Configured object cache size is too large"). That's why the
+workers are `e2-highmem-2` (16 GB) rather than `e2-standard-2`. The steps
+below were last verified on 4.9.
 
 Path-style addressing works, which sidesteps the wildcard-DNS problem that
 subdomain-style bucket addressing (`<bucket>.s3.quobyte-test.lab`) would
