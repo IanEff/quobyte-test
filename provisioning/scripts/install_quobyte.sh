@@ -65,7 +65,21 @@ echo "════════════════════════�
 echo "  Installing Quobyte layer (context: ${KCTL_CONTEXT})"
 echo "══════════════════════════════════════════"
 
-echo "[quobyte] Adding Quobyte Helm repository"
+# Chart sources. Quobyte now publishes charts as OCI artifacts under
+# quay.io/quobyte/charts; the old GitHub Pages repo is frozen (cluster 0.3.0,
+# client 0.3.4, csi 1.8.14). Client and CSI come from OCI at their latest.
+# quobyte-cluster deliberately stays on 0.3.0 from the old repo: OCI 1.0.2
+# drops PVC-backed data/metadata devices for node hostPath disks, which would
+# mean redesigning this rig's PD-CSI device model. 0.3.0 caps k8s at 1.34
+# (hence k3s_channel v1.34); the server image is overridden to 5.1 in
+# values-cluster.yaml either way.
+QUOBYTE_CLUSTER_CHART_VERSION="0.3.0"
+QUOBYTE_CLIENT_CHART="oci://quay.io/quobyte/charts/quobyte-client"
+QUOBYTE_CLIENT_CHART_VERSION="0.3.8"
+QUOBYTE_CSI_CHART="oci://quay.io/quobyte/charts/quobyte-csi"
+QUOBYTE_CSI_CHART_VERSION="2.4.0"
+
+echo "[quobyte] Adding Quobyte Helm repository (quobyte-cluster only)"
 helm repo add quobyte https://quobyte.github.io/quobyte-k8s-resources/helm-charts >/dev/null
 helm repo update quobyte >/dev/null
 
@@ -92,6 +106,7 @@ else
     echo "[quobyte] Installing quobyte-cluster (budget ~10-20 min — minReadySeconds"
     echo "          is 180s on data/metadata StatefulSets, they roll one pod at a time)"
     helm upgrade --install quobyte-cluster quobyte/quobyte-cluster \
+        --version "${QUOBYTE_CLUSTER_CHART_VERSION}" \
         --kube-context "${KCTL_CONTEXT}" \
         -n "${NAMESPACE}" -f "${REPO_ROOT}/quobyte/values-cluster.yaml" \
         --wait --timeout 20m
@@ -101,22 +116,20 @@ fi
 # The internal user table starts empty, which blocks quobyte-csi dynamic
 # provisioning with "unable to resolve user/group" until this runs.
 #
-# Known upstream landmine: qmgmt write commands (this one included) don't
-# fail cleanly without a real TTY — a rejected/empty answer just re-prompts
-# forever instead of erroring out. Defend against that here: no stdin to
-# read from (</dev/null, so a stray prompt can't block on it) and a hard
-# `timeout` so a hang fails loud in under a minute instead of wedging the
-# whole install. Read-only qmgmt commands (tenant list, etc.) don't have
-# this problem — only write commands do.
+# qmgmt is an API client and defaults to http://localhost:7860, which only
+# answers inside an API pod — from any other pod it loops on "Connection
+# refused" and then re-prompts "Username:" forever. So point it at the
+# quobyte-api Service explicitly, and pipe credentials on stdin to answer
+# the login prompt (an empty user table accepts them as default credentials).
+# The hard `timeout` still bounds any hang.
 #
-# Exec target: never recorded anywhere (checked the repo, running notes, and
-# the assembly sheet — only the qmgmt command text survived, not which pod it
-# ran against). Every Quobyte pod in this namespace shares the same
-# quay.io/quobyte/quobyte-server image and therefore ships the qmgmt binary,
-# so pick any live one — prefer the webconsole pod (single, stable replica)
-# and fall back to the first Running pod in the namespace.
+# Every Quobyte pod in this namespace shares the quay.io/quobyte/quobyte-server
+# image and therefore ships the qmgmt binary, so pick any live one — prefer
+# the webconsole pod (single, stable replica) and fall back to the first
+# Running pod in the namespace.
 echo "[quobyte] Bootstrapping qmgmt user table (root/quobyte)"
-QMGMT_POD=$(kctl get pods -n "${NAMESPACE}" -l app=quobyte-webconsole \
+QMGMT_URL="http://quobyte-api:7860"
+QMGMT_POD=$(kctl get pods -n "${NAMESPACE}" -l app=quobyte-web \
     -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
 if [ -z "${QMGMT_POD}" ]; then
     QMGMT_POD=$(kctl get pods -n "${NAMESPACE}" --field-selector=status.phase=Running \
@@ -128,14 +141,31 @@ if [ -z "${QMGMT_POD}" ]; then
 fi
 echo "[quobyte]   exec target: ${QMGMT_POD}"
 
-if ! timeout 60 kctl exec -i "${QMGMT_POD}" -n "${NAMESPACE}" -- \
-    qmgmt user config add root root@quobyte-test.lab SUPER_USER quobyte \
-    --member-of-tenant="My Tenant" --primary-group=root </dev/null; then
-    echo "[quobyte] WARNING: qmgmt bootstrap timed out or failed — this may just mean the" >&2
-    echo "[quobyte]   user already exists (safe to ignore on a re-run) or it hit the known" >&2
-    echo "[quobyte]   non-interactive-hang issue (see README 'Known issues'). Verify manually:" >&2
-    echo "[quobyte]     kubectl --context=${KCTL_CONTEXT} exec -it ${QMGMT_POD} -n ${NAMESPACE} -- qmgmt user config list" >&2
+qm() {
+    printf 'root\nquobyte\n' | timeout 60 kctl exec -i "${QMGMT_POD}" -n "${NAMESPACE}" -- \
+        qmgmt -u "${QMGMT_URL}" "$@"
+}
+
+# The user record stores tenants by UUID (member_of_tenant_id), so resolve
+# the default tenant's UUID rather than trusting the name to be accepted.
+TENANT_UUID=$(qm tenant list 2>/dev/null | awk '/^My Tenant /{print $3}')
+if [ -z "${TENANT_UUID}" ]; then
+    echo "[quobyte] ERROR: could not resolve the UUID of tenant 'My Tenant' via qmgmt tenant list." >&2
+    exit 1
 fi
+
+if ! qm user config add root root@quobyte-test.lab SUPER_USER quobyte \
+    --member-of-tenant="${TENANT_UUID}" --primary-group=root; then
+    echo "[quobyte] qmgmt user config add failed — may just mean root already exists; checking" >&2
+fi
+
+# The CSI provisioner needs root to exist *with* a primary group ("primary
+# group is empty" otherwise), so verify rather than trust the add.
+if ! qm user config list 2>/dev/null | grep -q "^root "; then
+    echo "[quobyte] ERROR: root user missing after bootstrap — CSI provisioning will fail." >&2
+    exit 1
+fi
+echo "[quobyte]   root user present (tenant ${TENANT_UUID}, primary group root)"
 
 echo "[quobyte] Applying Cilium Gateway routes"
 kctl apply -f "${REPO_ROOT}/quobyte/gateway/gateway-tls-secret.yaml"
@@ -146,12 +176,14 @@ kctl apply -f "${REPO_ROOT}/quobyte/gateway/httproute-hubble.yaml"
 kctl apply -f "${REPO_ROOT}/quobyte/gateway/httproute-s3.yaml"
 
 echo "[quobyte] Installing quobyte-client"
-helm upgrade --install quobyte-client quobyte/quobyte-client \
+helm upgrade --install quobyte-client "${QUOBYTE_CLIENT_CHART}" \
+    --version "${QUOBYTE_CLIENT_CHART_VERSION}" \
     --kube-context "${KCTL_CONTEXT}" \
     -n "${NAMESPACE}" -f "${REPO_ROOT}/quobyte/values-client.yaml" --wait
 
 echo "[quobyte] Installing quobyte-csi"
-helm upgrade --install quobyte-csi quobyte/quobyte-csi \
+helm upgrade --install quobyte-csi "${QUOBYTE_CSI_CHART}" \
+    --version "${QUOBYTE_CSI_CHART_VERSION}" \
     --kube-context "${KCTL_CONTEXT}" \
     -n "${NAMESPACE}" -f "${REPO_ROOT}/quobyte/values-csi.yaml" --wait
 

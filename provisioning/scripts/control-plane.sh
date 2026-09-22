@@ -20,7 +20,7 @@ echo "[1] Common baseline (kernel modules, sysctl, packages)"
 bash /quobyte-test/provisioning/scripts/common.sh
 
 echo "[2] Install Helm"
-HELM_VERSION="${HELM_VERSION:-v3.16.3}"
+HELM_VERSION="${HELM_VERSION:-v3.22.0}"
 ARCH=$(dpkg --print-architecture)
 curl --fail --show-error --silent --location \
      --connect-timeout 15 --max-time 180 --retry 3 --retry-delay 5 \

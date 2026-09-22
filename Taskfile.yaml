@@ -109,6 +109,15 @@ tasks:
     cmds:
       - gcloud compute start-iap-tunnel {{.CLUSTER_NAME}}-control-plane 6443 --local-host-port=localhost:6443 --zone={{.ZONE}} --project={{.PROJECT_ID}}
 
+  # Forward the Quobyte API service (which serves the MCP endpoint at /mcp)
+  # to localhost:7860, where .mcp.json points Claude Code. Needs `task tunnel`
+  # up first. Kept off the Gateway on purpose: MCP uses Basic auth, and the
+  # Gateway is plain HTTP on the public internet.
+  mcp:
+    desc: Port-forward the Quobyte API/MCP endpoint to localhost:7860 (needs task tunnel)
+    cmds:
+      - kubectl --context={{.CLUSTER_NAME}} -n quobyte port-forward svc/quobyte-api 7860:7860
+
   # Chains the 3 Quobyte Helm charts + qmgmt user bootstrap + Gateway/smoke
   # manifest applies — the sequence that was previously only ever run by hand
   # (see provisioning/scripts/install_quobyte.sh for the full breakdown and

@@ -1,4 +1,6 @@
 quobyte:
+  # Stays 4 on a Quobyte 5.x cluster: CSI v2.4.0 exits on anything but 3 or 4
+  # (src/cmd/main.go), and upstream tests v2.4.0 against Quobyte 5.0.1 with 4.
   version: 4
   apiURL: http://quobyte-api.quobyte.svc.cluster.local:7860
   clientMountPoint: /home/quobyte

@@ -7,9 +7,13 @@ Throwaway GCP test sandbox running Quobyte Free Edition on raw-VM k3s to evaluat
 - **Infrastructure:** OpenTofu on Google Cloud Platform
 - **Topology:** 1× `e2-medium` control-plane + 3× `e2-standard-2` workers (total 8 E2 vCPUs) in `us-east1-b`
 - **Disks:** 100% `pd-standard` boot and CSI storage devices (0 GB SSD quota used)
-- **Kubernetes:** k3s release pinned to `v1.34` (`v1.34.10+k3s1`)
-- **Networking:** Cilium 1.19 in Geneve/VXLAN tunnel mode + hostNetwork Gateway API + Hubble Relay/UI
-- **Storage:** Out-of-tree GCE PD CSI driver + Quobyte Free Edition Helm charts
+- **Kubernetes:** k3s channel `v1.34` (latest patch). This is the ceiling: `quobyte-cluster` chart 0.3.0 caps k8s below 1.35
+- **Networking:** Cilium 1.20.2 in VXLAN tunnel mode + hostNetwork Gateway API (CRDs v1.6.1) + Hubble Relay/UI
+- **Storage:** Out-of-tree GCE PD CSI driver + Quobyte 5.1 (server and client images pinned by digest). Charts: `quobyte-cluster` 0.3.0 (legacy helm repo), `quobyte-client` 0.3.8 and `quobyte-csi` 2.4.0 (OCI, `quay.io/quobyte/charts`)
+
+Why `quobyte-cluster` stays on 0.3.0: the newer OCI 1.0.2 chart moves data and
+metadata devices from PVCs to hostPath disks on the node, which would mean
+redesigning this rig's PD-CSI device model. 0.3.0 still runs the 5.1 image fine.
 
 ## Quickstart
 
@@ -89,15 +93,18 @@ shows up as a registered volume there.
 
 ### Exercise `qmgmt` directly
 
-`qmgmt` runs from inside any Quobyte pod (they all share the server image).
-Write commands need real piped credentials — see **Known issues** below.
+`qmgmt` ships in every Quobyte pod (they all share the server image), but it's
+an API client that defaults to `localhost:7860`, so outside an API pod you have
+to point it at the `quobyte-api` Service with `-u`. It prompts for a login, so
+pipe credentials in (see **Known issues**):
 
 ```bash
-QMGMT_POD=$(kubectl --context=quobyte-test get pods -n quobyte -l app=quobyte-webconsole -o jsonpath='{.items[0].metadata.name}')
+QMGMT_POD=$(kubectl --context=quobyte-test get pods -n quobyte -l app=quobyte-web -o name | head -1)
+qm() { printf 'root\nquobyte\n' | kubectl --context=quobyte-test exec -i "$QMGMT_POD" -n quobyte -- qmgmt -u http://quobyte-api:7860 "$@"; }
 
-# read-only, no auth needed
-kubectl --context=quobyte-test exec -it "$QMGMT_POD" -n quobyte -- qmgmt tenant list
-kubectl --context=quobyte-test exec -it "$QMGMT_POD" -n quobyte -- qmgmt user config list
+qm tenant list
+qm user config list
+qm volume list
 ```
 
 ### S3 Gateway demo
@@ -107,8 +114,7 @@ subdomain-style bucket addressing (`<bucket>.s3.quobyte-test.lab`) would
 otherwise need. First mint an access key (root has none by default):
 
 ```bash
-kubectl --context=quobyte-test exec -it "$QMGMT_POD" -n quobyte -- \
-  qmgmt accesskey create --tenant="My Tenant" GENERAL_ACCESS_KEY root
+qm accesskey create --tenant="My Tenant" GENERAL_ACCESS_KEY root
 # -> prints an access key + secret key, capture both
 ```
 
@@ -161,6 +167,27 @@ kubectl --context=quobyte-test delete pod quobyte-reg-0 -n quobyte
 Watch recovery with `kubectl get pods -n quobyte -w` and cross-check the
 webconsole's service health view alongside `qmgmt` output.
 
+### Ask the cluster questions via MCP
+
+Quobyte 5.x's API service serves an MCP endpoint at `/mcp` that exposes the
+File Query Engine to an LLM agent (`describe_query_schema`, `query_files`,
+`preview_query`, `get_query_result`, `cancel_query`, `show_query_id`).
+`.mcp.json` at the repo root registers it as `quobyte` for Claude Code, only
+when it's launched from this directory. It points at `localhost:7860` with
+Basic auth for `root`/`quobyte`, so the API has to be forwarded first:
+
+```bash
+task tunnel &   # k3s API over IAP
+task mcp &      # port-forward svc/quobyte-api -> localhost:7860
+claude          # from the repo root; /mcp shows the quobyte server
+```
+
+The forward goes over the IAP tunnel rather than the public Gateway on
+purpose: Basic auth over the Gateway's plain HTTP would put credentials on
+the internet. Override the credential with `QUOBYTE_MCP_AUTH=<base64 user:pass>`.
+Queries only return something once a volume exists (the RWX smoke PVC makes
+one).
+
 ### Teardown / rebuild
 
 `task destroy` uninstalls the Quobyte helm releases first (so the CSI
@@ -170,13 +197,15 @@ everything from bare VMs in one shot, including re-running the smoke test.
 
 ## Known issues
 
-- **`qmgmt` write commands hang without a real TTY.** Any write command
-  (`user config add`, `whoami`, etc.) run non-interactively doesn't fail
-  cleanly on a rejected/empty answer — it just re-prompts `Username:` forever
-  instead of erroring out. `install_quobyte.sh` defends against this with a
-  piped-stdin, `timeout`-wrapped exec, but if you're running `qmgmt` by hand,
-  always pipe real credentials through a foreground `kubectl exec -i`. Read-only
-  commands (`tenant list`, etc.) are unaffected — they work with zero auth.
-  Open question, not filed upstream: is the write/read auth asymmetry
-  intentional Free Edition posture, or an artifact of the empty bootstrap user
-  table?
+- **`qmgmt` loops forever instead of failing.** Run without `-u` outside an
+  API pod, it retries `Connection refused` against `localhost:7860` and then
+  re-prompts `Username:` endlessly when stdin is empty. Always pass
+  `-u http://quobyte-api:7860` and pipe credentials. This bit the original
+  bootstrap: it exec'd into a pod selected by the wrong label
+  (`app=quobyte-webconsole`; the real label is `app=quobyte-web`), never
+  created `root`, and the smoke PVC sat `Pending` with "unable to resolve
+  user/group". `install_quobyte.sh` now fails the install if `root` is missing.
+- **API pods can hold stale registry IPs after a rolling restart.** When the
+  registry pods get new IPs, the API keeps dialing the old ones and every
+  request hangs until timeout. `kubectl rollout restart deploy/quobyte-api`
+  clears it.

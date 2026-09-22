@@ -1,8 +1,9 @@
 quobyte:
   registry: _quobyte._tcp.quobyte.quobyte.svc.cluster.local
-  # Pinned by digest (verified 2026-09-22, skopeo inspect) — see values-cluster.yaml.
-  clientImage: "quay.io/quobyte/quobyte-client@sha256:8a52a405741d530669446166de55041616701245189fdb6f0db5a4f9e0fb0be0"
-  clientVersion: "4"
+  # :5 and :5.1 both resolved to this digest (verified 2026-09-22) — kept on
+  # the same release as the server pin in values-cluster.yaml.
+  clientImage: "quay.io/quobyte/quobyte-client@sha256:8776b83e1628705f1d50f56f758054b39441483b2cc59bdf4df3dba9160723fd"
+  clientVersion: "5"
   clientMountPoint: "/home/quobyte/mounts"
   volumeMountPoint: "/home/quobyte"
   enableAccessKeys: "false"

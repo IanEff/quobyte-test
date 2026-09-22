@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "quobyte": {
+      "type": "http",
+      "url": "http://localhost:7860/mcp",
+      "headers": {
+        "Authorization": "Basic ${QUOBYTE_MCP_AUTH:-cm9vdDpxdW9ieXRl}"
+      }
+    }
+  }
+}

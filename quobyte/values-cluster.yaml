@@ -26,10 +26,13 @@ quobyte:
 
   lbinternal: false
   webconsoleport: 8080
-  # :4 and :4.9 both resolved to this digest (verified 2026-09-22, skopeo
-  # inspect) — pinned by digest, not the floating :4 tag, so an upgrade never
-  # silently jumps point releases on a pod restart/reschedule.
-  image: quay.io/quobyte/quobyte-server@sha256:6a3dd968f6c48eaa8050eaa42751675e6d406508f8ea9cf72b2a77bf0da440ef
+  # :5 and :5.1 both resolved to this digest (verified 2026-09-22, skopeo
+  # inspect --raw | sha256) — pinned by digest, not the floating :5 tag, so an
+  # upgrade never silently jumps point releases on a pod restart/reschedule.
+  # 5.x is required for the API service's /mcp endpoint (4.9 has no MCP
+  # server; 5.1 ships mcp-core-2.0.0.jar). Previous pin, 4.9:
+  # sha256:6a3dd968f6c48eaa8050eaa42751675e6d406508f8ea9cf72b2a77bf0da440ef
+  image: quay.io/quobyte/quobyte-server@sha256:88fd2e5642529a8fb324f8bc22e127e1f3b5ddce77f9446ae9a7c9de53bbf652
   maxopenfiles: "1048576"
   maxprocs: "16384"
 
