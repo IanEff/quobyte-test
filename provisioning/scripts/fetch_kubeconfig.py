@@ -82,7 +82,7 @@ def add() -> None:
     merged_conf = tmpdir / "kubeconfig.merged"
     try:
         content = result.stdout
-        # Rewrite server URL: internal IP -> 127.0.0.1 (matches local `just tunnel` forwarding)
+        # Rewrite server URL: internal IP -> 127.0.0.1 (matches local `task tunnel` forwarding)
         content = content.replace(internal_ip, "127.0.0.1")
         content = content.replace("current-context: default", f"current-context: {NEW_CONTEXT_NAME}")
         content = re.sub(r"\bcluster: default\b", f"cluster: {NEW_CLUSTER_NAME}", content)
@@ -106,7 +106,7 @@ def add() -> None:
         shutil.move(str(merged_conf), KUBE_CONFIG_PATH)
         KUBE_CONFIG_PATH.chmod(0o600)
         print(f"✓ Kubeconfig updated. Context '{NEW_CONTEXT_NAME}' is now current.")
-        print("  Server: https://127.0.0.1:6443 (run `just tunnel &` to start the IAP tunnel)")
+        print("  Server: https://127.0.0.1:6443 (run `task tunnel &` to start the IAP tunnel)")
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
 

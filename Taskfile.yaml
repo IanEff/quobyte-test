@@ -1,0 +1,132 @@
+version: "3"
+
+vars:
+  CLUSTER_NAME: '{{.CLUSTER_NAME | default "quobyte-test"}}'
+  PROJECT_ID:
+    sh: tofu output -raw project_id 2>/dev/null || gcloud config get-value project 2>/dev/null || echo "terraform-sandbox-430820"
+  ZONE:
+    sh: tofu output -raw zone 2>/dev/null || echo "us-east1-b"
+  REGION:
+    sh: tofu output -raw region 2>/dev/null || echo "us-east1"
+
+tasks:
+  default:
+    desc: List available tasks
+    silent: true
+    cmds:
+      - task --list
+
+  fmt:
+    desc: Format OpenTofu configurations
+    cmds:
+      - tofu fmt -recursive
+
+  init:
+    desc: Initialize OpenTofu root module
+    cmds:
+      - tofu init
+
+  validate:
+    desc: Validate OpenTofu configurations
+    deps: [init]
+    cmds:
+      - tofu validate
+
+  plan:
+    desc: Generate OpenTofu execution plan
+    deps: [init]
+    cmds:
+      - tofu plan
+
+  apply:
+    desc: Apply OpenTofu infrastructure changes (creates billed GCP resources)
+    deps: [init]
+    cmds:
+      - tofu apply -auto-approve
+
+  # One-shot bootstrap: VMs -> kubeconfig -> /etc/hosts -> the full Quobyte
+  # layer (helm charts, qmgmt bootstrap, Gateway routes, RWX smoke test).
+  up:
+    desc: One-shot bootstrap — VMs, credentials, hosts, and the full Quobyte layer
+    cmds:
+      - task: apply
+      - task: credentials
+      - task: hosts
+      - task: quobyte:up
+      - |
+        echo ""
+        echo "Cluster is up! Start the background IAP tunnel for kubectl access:"
+        echo "  task tunnel &"
+        echo "Verify nodes:"
+        echo "  kubectl --context={{.CLUSTER_NAME}} get nodes -o wide"
+
+  # quobyte:down runs first so the CSI driver's Delete reclaim policy cleans
+  # up its dynamically-provisioned PDs while the cluster can still process
+  # the deletion — those disks aren't Tofu-managed, so a bare `tofu destroy`
+  # orphans them. Ignored (`-`) since a fresh repo with no prior `up` has
+  # nothing installed to tear down.
+  destroy:
+    desc: Teardown all Tofu-managed GCP resources (runs quobyte:down first to avoid orphaned PDs)
+    deps: [init]
+    cmds:
+      - task: quobyte:down
+        ignore_error: true
+      - tofu destroy -auto-approve
+      - task: hosts-remove
+      - task: credentials-remove
+
+  credentials:
+    desc: Fetch kubeconfig for the cluster
+    cmds:
+      - python3 provisioning/scripts/fetch_kubeconfig.py add
+
+  credentials-remove:
+    desc: Remove fetched kubeconfig context
+    cmds:
+      - python3 provisioning/scripts/fetch_kubeconfig.py remove
+
+  hosts:
+    desc: Add *.quobyte-test.lab entries to /etc/hosts
+    cmds:
+      - sudo python3 provisioning/scripts/manage_hosts.py add $(tofu output -raw control_plane_external_ip)
+
+  hosts-remove:
+    desc: Remove *.quobyte-test.lab entries from /etc/hosts
+    cmds:
+      - sudo python3 provisioning/scripts/manage_hosts.py remove
+
+  # SSH to control-plane or node-1/2/3 via IAP
+  ssh:
+    desc: SSH to a node via IAP tunnel (TARGET=control-plane or TARGET=node-<n>)
+    vars:
+      TARGET: '{{.TARGET | default "control-plane"}}'
+    cmds:
+      - gcloud compute ssh {{.CLUSTER_NAME}}-{{.TARGET}} --zone={{.ZONE}} --project={{.PROJECT_ID}} --tunnel-through-iap
+
+  # Open local IAP port forward to k3s API on 127.0.0.1:6443
+  tunnel:
+    desc: Open an IAP tunnel to k3s API on localhost:6443
+    cmds:
+      - gcloud compute start-iap-tunnel {{.CLUSTER_NAME}}-control-plane 6443 --local-host-port=localhost:6443 --zone={{.ZONE}} --project={{.PROJECT_ID}}
+
+  # Chains the 3 Quobyte Helm charts + qmgmt user bootstrap + Gateway/smoke
+  # manifest applies — the sequence that was previously only ever run by hand
+  # (see provisioning/scripts/install_quobyte.sh for the full breakdown and
+  # the qmgmt non-interactive-hang defenses it applies).
+  quobyte:up:
+    desc: Install the Quobyte layer (helm charts, qmgmt bootstrap, gateway + smoke manifests)
+    cmds:
+      - CLUSTER_NAME={{.CLUSTER_NAME}} bash provisioning/scripts/install_quobyte.sh
+
+  # helm has no --ignore-not-found, so each uninstall is wrapped individually
+  # — a partially-installed layer (e.g. cluster chart up, client/csi never
+  # applied) shouldn't abort the rest of the teardown.
+  quobyte:down:
+    desc: Uninstall all Quobyte helm releases (run before tofu destroy to avoid orphaned CSI PDs)
+    cmds:
+      - |
+        for release in quobyte-csi quobyte-client quobyte-cluster; do
+          helm uninstall "$release" --kube-context {{.CLUSTER_NAME}} -n quobyte --wait --timeout 10m 2>/dev/null \
+            && echo "uninstalled $release" \
+            || echo "$release not installed, skipping"
+        done

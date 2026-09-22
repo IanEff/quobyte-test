@@ -5,7 +5,7 @@ metadata:
   namespace: quobyte
 type: Opaque
 stringData:
-  user: "admin"
+  user: "root"
   password: "quobyte"
 ---
 apiVersion: storage.k8s.io/v1

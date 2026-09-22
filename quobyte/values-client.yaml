@@ -1,6 +1,7 @@
 quobyte:
   registry: _quobyte._tcp.quobyte.quobyte.svc.cluster.local
-  clientImage: "quay.io/quobyte/quobyte-client:4"
+  # Pinned by digest (verified 2026-09-22, skopeo inspect) — see values-cluster.yaml.
+  clientImage: "quay.io/quobyte/quobyte-client@sha256:8a52a405741d530669446166de55041616701245189fdb6f0db5a4f9e0fb0be0"
   clientVersion: "4"
   clientMountPoint: "/home/quobyte/mounts"
   volumeMountPoint: "/home/quobyte"
