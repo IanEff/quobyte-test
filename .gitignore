@@ -7,3 +7,4 @@ terraform.tfvars
 cloud-sa.json
 __pycache__/
 *.bak.*
+CLAUDE.local.md
