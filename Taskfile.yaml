@@ -95,6 +95,27 @@ tasks:
     cmds:
       - sudo python3 provisioning/scripts/manage_hosts.py remove
 
+  # One-time setup so `task up`/`task destroy` don't stop for a sudo password
+  # prompt on the hosts/hosts-remove steps. Validates with visudo before
+  # installing so a typo here can't corrupt sudo for the whole machine.
+  sudoers:
+    desc: Install a NOPASSWD sudoers rule for manage_hosts.py (run once, requires sudo)
+    cmds:
+      - |
+        set -euo pipefail
+        PYTHON3=$(command -v python3)
+        SCRIPT="{{.ROOT_DIR}}/provisioning/scripts/manage_hosts.py"
+        USERNAME=$(id -un)
+        TMP_FILE=$(mktemp)
+        trap 'rm -f "$TMP_FILE"' EXIT
+        cat > "$TMP_FILE" <<EOF
+        $USERNAME ALL=(root) NOPASSWD: $PYTHON3 $SCRIPT add *
+        $USERNAME ALL=(root) NOPASSWD: $PYTHON3 $SCRIPT remove
+        EOF
+        sudo visudo -c -f "$TMP_FILE"
+        sudo install -m 0440 -o root -g wheel "$TMP_FILE" /etc/sudoers.d/quobyte-test
+        echo "✓ Installed /etc/sudoers.d/quobyte-test"
+
   # SSH to control-plane or node-1/2/3 via IAP
   ssh:
     desc: SSH to a node via IAP tunnel (TARGET=control-plane or TARGET=node-<n>)

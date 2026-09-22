@@ -121,7 +121,9 @@ fi
 # refused" and then re-prompts "Username:" forever. So point it at the
 # quobyte-api Service explicitly, and pipe credentials on stdin to answer
 # the login prompt (an empty user table accepts them as default credentials).
-# The hard `timeout` still bounds any hang.
+# A hard `timeout` bounds any hang. The original bootstrap never created root
+# because `timeout 60 kctl ...` exited 127 behind an `if !` that read it as
+# "user already exists".
 #
 # Every Quobyte pod in this namespace shares the quay.io/quobyte/quobyte-server
 # image and therefore ships the qmgmt binary, so pick any live one — prefer
@@ -142,8 +144,10 @@ fi
 echo "[quobyte]   exec target: ${QMGMT_POD}"
 
 qm() {
-    printf 'root\nquobyte\n' | timeout 60 kctl exec -i "${QMGMT_POD}" -n "${NAMESPACE}" -- \
-        qmgmt -u "${QMGMT_URL}" "$@"
+    # `timeout` runs inside the pod: kctl is a shell function, so a local
+    # `timeout 60 kctl ...` can't exec it and exits 127 (command not found).
+    printf 'root\nquobyte\n' | kctl exec -i "${QMGMT_POD}" -n "${NAMESPACE}" -- \
+        timeout 60 qmgmt -u "${QMGMT_URL}" "$@"
 }
 
 # The user record stores tenants by UUID (member_of_tenant_id), so resolve
