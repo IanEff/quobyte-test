@@ -41,7 +41,7 @@ cleanup() {
 trap cleanup EXIT
 
 if ! port_open; then
-    PROJECT_ID="${PROJECT_ID:-$(tofu output -raw project_id 2>/dev/null || gcloud config get-value project 2>/dev/null || echo "terraform-sandbox-430820")}"
+    PROJECT_ID="${PROJECT_ID:-$(tofu output -raw project_id 2>/dev/null || echo "terraform-sandbox-430820")}"
     ZONE="${ZONE:-$(tofu output -raw zone 2>/dev/null || echo "us-east1-b")}"
     echo "[quobyte] No IAP tunnel detected on 127.0.0.1:6443 — starting one for this install"
     gcloud compute start-iap-tunnel "${KCTL_CONTEXT}-control-plane" 6443 \
@@ -95,9 +95,13 @@ kctl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kctl apply -f -
 # Skip releases already `deployed` so re-runs are actually idempotent; set
 # QUOBYTE_FORCE=1 to force a real upgrade (e.g. after changing chart version
 # or values-*.yaml).
+# Capture first, then match: piping straight into `grep -q` under pipefail
+# lets grep's early exit SIGPIPE helm, which reads as "not deployed" and
+# triggers the very upgrade this check exists to skip.
 release_deployed() {
-    helm status "$1" --kube-context "${KCTL_CONTEXT}" -n "${NAMESPACE}" 2>/dev/null \
-        | grep -q "^STATUS: deployed"
+    local status
+    status=$(helm status "$1" --kube-context "${KCTL_CONTEXT}" -n "${NAMESPACE}" 2>/dev/null) || return 1
+    grep -q "^STATUS: deployed" <<<"${status}"
 }
 
 if [ "${QUOBYTE_FORCE:-}" != "1" ] && release_deployed quobyte-cluster; then
@@ -152,7 +156,15 @@ qm() {
 
 # The user record stores tenants by UUID (member_of_tenant_id), so resolve
 # the default tenant's UUID rather than trusting the name to be accepted.
-TENANT_UUID=$(qm tenant list 2>/dev/null | awk '/^My Tenant /{print $3}')
+# Retried: right after a fresh install the API can still be settling, and the
+# first call has been seen to hit the 60s timeout (exit 124).
+TENANT_UUID=""
+for attempt in 1 2 3 4 5; do
+    TENANT_UUID=$(qm tenant list 2>/dev/null | awk '/^My Tenant /{print $3}') || true
+    [ -n "${TENANT_UUID}" ] && break
+    echo "[quobyte]   qmgmt not answering yet (attempt ${attempt}/5), retrying in 15s"
+    sleep 15
+done
 if [ -z "${TENANT_UUID}" ]; then
     echo "[quobyte] ERROR: could not resolve the UUID of tenant 'My Tenant' via qmgmt tenant list." >&2
     exit 1

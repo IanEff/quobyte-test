@@ -109,6 +109,11 @@ qm volume list
 
 ### S3 Gateway demo
 
+**Currently disabled** (`s3.enabled: false` in `values-cluster.yaml`). On
+Quobyte 5.1 the S3 gateway defaults to a 10 GiB object cache and crash-loops
+on 8 GB nodes ("Configured object cache size is too large"). Re-enable it on
+bigger workers. The steps below worked on 4.9.
+
 Path-style addressing works, which sidesteps the wildcard-DNS problem that
 subdomain-style bucket addressing (`<bucket>.s3.quobyte-test.lab`) would
 otherwise need. First mint an access key (root has none by default):
@@ -185,8 +190,16 @@ claude          # from the repo root; /mcp shows the quobyte server
 The forward goes over the IAP tunnel rather than the public Gateway on
 purpose: Basic auth over the Gateway's plain HTTP would put credentials on
 the internet. Override the credential with `QUOBYTE_MCP_AUTH=<base64 user:pass>`.
-Queries only return something once a volume exists (the RWX smoke PVC makes
-one).
+**Queries need a license.** Unlicensed, every query comes back "Access denied".
+`qmgmt query files` gives the real reason: `The File Query Engine is not
+enabled for the configured license`. The MCP handshake, tool list and
+`preview_query` all work without a license. To run real queries, get a key
+(free registration at quobyte.com/register-free covers Free and Enterprise
+keys) and import it:
+
+```bash
+qm license import <key-file-or-key>   # see `qmgmt license -h`; qm() is defined above
+```
 
 ### Teardown / rebuild
 

@@ -19,8 +19,12 @@ quobyte:
       mountpoint: /var/lib/quobyte/devices/metadata0
       size: "30Gi"
 
+  # Off on Quobyte 5.1: the S3 gateway defaults to a 10 GiB object cache and
+  # refuses to start when that exceeds what the node's RAM allows (~7.7 GiB
+  # on an 8 GB e2-standard-2). Chart 0.3.0 has no knob for it, and
+  # QUOBYTE_MAX_BUFFER_S3 doesn't move it. Re-enable on bigger nodes.
   s3:
-    enabled: true
+    enabled: false
     replicas: 1
     dnsname: s3.quobyte-test.lab
 

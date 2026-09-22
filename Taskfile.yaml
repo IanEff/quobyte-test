@@ -3,7 +3,7 @@ version: "3"
 vars:
   CLUSTER_NAME: '{{.CLUSTER_NAME | default "quobyte-test"}}'
   PROJECT_ID:
-    sh: tofu output -raw project_id 2>/dev/null || gcloud config get-value project 2>/dev/null || echo "terraform-sandbox-430820"
+    sh: tofu output -raw project_id 2>/dev/null || echo "terraform-sandbox-430820"
   ZONE:
     sh: tofu output -raw zone 2>/dev/null || echo "us-east1-b"
   REGION:
@@ -88,12 +88,12 @@ tasks:
   hosts:
     desc: Add *.quobyte-test.lab entries to /etc/hosts
     cmds:
-      - sudo python3 provisioning/scripts/manage_hosts.py add $(tofu output -raw control_plane_external_ip)
+      - sudo python3 {{.ROOT_DIR}}/provisioning/scripts/manage_hosts.py add $(tofu output -raw control_plane_external_ip)
 
   hosts-remove:
     desc: Remove *.quobyte-test.lab entries from /etc/hosts
     cmds:
-      - sudo python3 provisioning/scripts/manage_hosts.py remove
+      - sudo python3 {{.ROOT_DIR}}/provisioning/scripts/manage_hosts.py remove
 
   # One-time setup so `task up`/`task destroy` don't stop for a sudo password
   # prompt on the hosts/hosts-remove steps. Validates with visudo before
