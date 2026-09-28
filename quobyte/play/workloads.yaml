@@ -1,0 +1,158 @@
+# All clients run the same stock image with their script mounted from the
+# play-scripts ConfigMap (kustomize hashes its name, so editing a script
+# rolls the pods that use it).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: trainer
+  labels: { app: trainer }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: trainer } }
+  template:
+    metadata:
+      labels: { app: trainer, play: checkpoint }
+    spec:
+      containers:
+        - name: trainer
+          image: python:3.12-slim
+          command: [python3, -u, /scripts/trainer.py]
+          env:
+            - { name: SHARDS, value: "4" }
+            - { name: SHARD_MB, value: "32" }
+            - { name: INTERVAL, value: "60" }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 256Mi }
+          volumeMounts:
+            - { name: scripts, mountPath: /scripts }
+            - { name: training, mountPath: /data }
+      volumes:
+        - name: scripts
+          configMap: { name: play-scripts }
+        - name: training
+          persistentVolumeClaim: { claimName: training }
+---
+# Two readers, kept off the trainer's node and off each other's where the
+# scheduler can manage it, so every verified read crosses nodes.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: evaluator
+  labels: { app: evaluator }
+spec:
+  replicas: 2
+  selector: { matchLabels: { app: evaluator } }
+  template:
+    metadata:
+      labels: { app: evaluator, play: checkpoint }
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector: { matchLabels: { play: checkpoint } }
+                topologyKey: kubernetes.io/hostname
+      containers:
+        - name: evaluator
+          image: python:3.12-slim
+          command: [python3, -u, /scripts/evaluator.py]
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 128Mi }
+          volumeMounts:
+            - { name: scripts, mountPath: /scripts }
+            - { name: training, mountPath: /data, readOnly: true }
+      volumes:
+        - name: scripts
+          configMap: { name: play-scripts }
+        - name: training
+          persistentVolumeClaim: { claimName: training }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crossproto
+  labels: { app: crossproto }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: crossproto } }
+  template:
+    metadata:
+      labels: { app: crossproto }
+    spec:
+      containers:
+        - name: crossproto
+          image: python:3.12-slim
+          command: [sh, -c, "pip install --quiet --no-cache-dir --root-user-action=ignore boto3 && exec python3 -u /scripts/crossproto.py"]
+          envFrom:
+            - secretRef: { name: s3-credentials }   # created by install_play.sh
+          resources:
+            requests: { cpu: 50m, memory: 192Mi }
+            limits: { memory: 384Mi }
+          volumeMounts:
+            - { name: scripts, mountPath: /scripts }
+            - { name: lake, mountPath: /lake }
+      volumes:
+        - name: scripts
+          configMap: { name: play-scripts }
+        - name: lake
+          persistentVolumeClaim: { claimName: lake }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: metastorm
+  labels: { app: metastorm }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: metastorm } }
+  template:
+    metadata:
+      labels: { app: metastorm }
+    spec:
+      containers:
+        - name: metastorm
+          image: python:3.12-slim
+          command: [python3, -u, /scripts/metastorm.py]
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 128Mi }
+          volumeMounts:
+            - { name: scripts, mountPath: /scripts }
+            - { name: scratch, mountPath: /scratch }
+      volumes:
+        - name: scripts
+          configMap: { name: play-scripts }
+        - name: scratch
+          persistentVolumeClaim: { claimName: scratch }
+---
+# One-shot. Jobs are immutable, so install_play.sh deletes it before each
+# apply; the script skips files that already exist, so a re-run is cheap.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: datagen
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels: { app: datagen }
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: datagen
+          image: python:3.12-slim
+          command: [python3, -u, /scripts/datagen.py]
+          resources:
+            requests: { cpu: 100m, memory: 128Mi }
+            limits: { memory: 256Mi }
+          volumeMounts:
+            - { name: scripts, mountPath: /scripts }
+            - { name: home, mountPath: /home-vol }
+      volumes:
+        - name: scripts
+          configMap: { name: play-scripts }
+        - name: home
+          persistentVolumeClaim: { claimName: home }

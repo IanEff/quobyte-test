@@ -8,3 +8,6 @@ cloud-sa.json
 __pycache__/
 *.bak.*
 CLAUDE.local.md
+
+# Quobyte license key (repo is public)
+quobyte/license.key

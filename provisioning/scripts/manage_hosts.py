@@ -16,6 +16,7 @@ HOSTNAMES = [
     f"quobyte.{DOMAIN}",
     f"hubble.{DOMAIN}",
     f"s3.{DOMAIN}",
+    f"grafana.{DOMAIN}",
 ]
 
 BEGIN_MARKER = "# BEGIN quobyte-test"

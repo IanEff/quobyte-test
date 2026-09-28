@@ -45,14 +45,17 @@ tasks:
       - tofu apply -auto-approve
 
   # One-shot bootstrap: VMs -> kubeconfig -> /etc/hosts -> the full Quobyte
-  # layer (helm charts, qmgmt bootstrap, Gateway routes, RWX smoke test).
+  # layer (helm charts, qmgmt bootstrap, Gateway routes, RWX smoke test) ->
+  # Prometheus/Grafana/Hubble metrics -> the play clients.
   up:
-    desc: One-shot bootstrap — VMs, credentials, hosts, and the full Quobyte layer
+    desc: One-shot bootstrap — VMs, credentials, hosts, Quobyte, observability, play clients
     cmds:
       - task: apply
       - task: credentials
       - task: hosts
       - task: quobyte:up
+      - task: observability:up
+      - task: play:up
       - |
         echo ""
         echo "Cluster is up! Start the background IAP tunnel for kubectl access:"
@@ -72,6 +75,7 @@ tasks:
       - task: quobyte:down
         ignore_error: true
       - tofu destroy -auto-approve
+      - task: pd:prune
       - task: hosts-remove
       - task: credentials-remove
 
@@ -124,6 +128,18 @@ tasks:
     cmds:
       - gcloud compute ssh {{.CLUSTER_NAME}}-{{.TARGET}} --zone={{.ZONE}} --project={{.PROJECT_ID}} --tunnel-through-iap
 
+  # Pipes the local ntp.sh to every VM, so the running nodes match the repo
+  # without a rebuild (new VMs get it from common.sh at boot).
+  ntp:
+    desc: Install and configure ntp (ntpd) on every VM over IAP
+    cmds:
+      - |
+        for vm in $(gcloud compute instances list --project={{.PROJECT_ID}} --filter="name~^{{.CLUSTER_NAME}}-" --format='value(name)'); do
+          echo "── $vm"
+          gcloud compute ssh "$vm" --zone={{.ZONE}} --project={{.PROJECT_ID}} --tunnel-through-iap \
+            --command 'sudo bash -s' < provisioning/scripts/ntp.sh
+        done
+
   # Open local IAP port forward to k3s API on 127.0.0.1:6443
   tunnel:
     desc: Open an IAP tunnel to k3s API on localhost:6443
@@ -148,15 +164,73 @@ tasks:
     cmds:
       - CLUSTER_NAME={{.CLUSTER_NAME}} bash provisioning/scripts/install_quobyte.sh
 
+  # Hubble metrics + L7 visibility CNPs, Prometheus scraping every Quobyte
+  # service/client, Grafana with Quobyte's and Cilium's dashboards.
+  observability:up:
+    desc: Install Hubble metrics, visibility CNPs, Prometheus + Grafana with Quobyte dashboards
+    cmds:
+      - CLUSTER_NAME={{.CLUSTER_NAME}} bash provisioning/scripts/install_observability.sh
+
+  play:up:
+    desc: Deploy the play clients (checkpoint trainer/evaluators, cross-protocol, metastorm, datagen)
+    cmds:
+      - CLUSTER_NAME={{.CLUSTER_NAME}} bash provisioning/scripts/install_play.sh
+
+  # Unpublishes the lake bucket, then deletes the namespace; the PVCs'
+  # Delete reclaim policy removes their Quobyte volumes.
+  play:down:
+    desc: Delete the play namespace and its volumes (unpublishes the lake bucket first)
+    cmds:
+      - CLUSTER_NAME={{.CLUSTER_NAME}} bash provisioning/scripts/uninstall_play.sh
+
+  play:logs:
+    desc: Tail every play client's log
+    cmds:
+      - kubectl --context={{.CLUSTER_NAME}} -n quobyte-play logs -f --prefix --max-log-requests 10 --tail 5 -l 'app in (trainer,evaluator,crossproto,metastorm,datagen)'
+
+  # warp is a Job, so re-running means delete + create.
+  play:bench:
+    desc: Run a 3-minute MinIO warp mixed benchmark against the S3 gateway
+    cmds:
+      - kubectl --context={{.CLUSTER_NAME}} -n quobyte-play delete job warp-mixed --ignore-not-found
+      - kubectl --context={{.CLUSTER_NAME}} apply -f quobyte/play/bench/warp.yaml
+      - kubectl --context={{.CLUSTER_NAME}} -n quobyte-play wait --for=condition=complete job/warp-mixed --timeout=6m || true
+      - kubectl --context={{.CLUSTER_NAME}} -n quobyte-play logs job/warp-mixed --tail=40
+
+  # Local hubble CLI against the relay: `hubble observe ...` in another shell.
+  hubble:
+    desc: Port-forward Hubble Relay to localhost:4245 for the hubble CLI (needs task tunnel)
+    cmds:
+      - kubectl --context={{.CLUSTER_NAME}} -n kube-system port-forward svc/hubble-relay 4245:80
+
   # helm has no --ignore-not-found, so each uninstall is wrapped individually
   # — a partially-installed layer (e.g. cluster chart up, client/csi never
   # applied) shouldn't abort the rest of the teardown.
   quobyte:down:
     desc: Uninstall all Quobyte helm releases (run before tofu destroy to avoid orphaned CSI PDs)
     cmds:
+      - task: play:down
       - |
         for release in quobyte-csi quobyte-client quobyte-cluster; do
           helm uninstall "$release" --kube-context {{.CLUSTER_NAME}} -n quobyte --wait --timeout 10m 2>/dev/null \
             && echo "uninstalled $release" \
             || echo "$release not installed, skipping"
         done
+      # helm uninstall leaves StatefulSet volumeClaimTemplate PVCs behind, so
+      # their PVs stay Bound and the Delete reclaim policy never fires. Delete
+      # them here and wait for the CSI driver to remove the backing PDs.
+      - |
+        kubectl --context={{.CLUSTER_NAME}} -n quobyte delete pvc --all --wait --timeout 5m
+        kubectl --context={{.CLUSTER_NAME}} wait pv --all --for=delete --timeout 5m 2>/dev/null || true
+
+  # Safety net for when quobyte:down couldn't reach the cluster (tunnel down,
+  # cluster half-built): delete any unattached PDs the CSI driver created.
+  pd:prune:
+    desc: Delete orphaned (unattached) PD CSI disks in the project
+    cmds:
+      - |
+        disks=$(gcloud compute disks list --project {{.PROJECT_ID}} \
+          --filter='description~"pd.csi.storage.gke.io" AND -users:*' \
+          --format='value(name)' 2>/dev/null)
+        if [ -z "$disks" ]; then echo "no orphaned PD CSI disks"; exit 0; fi
+        gcloud compute disks delete $disks --zone {{.ZONE}} --project {{.PROJECT_ID}} --quiet

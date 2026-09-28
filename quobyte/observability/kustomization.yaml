@@ -1,0 +1,31 @@
+# Quobyte's Grafana dashboards, vendored from github.com/quobyte/quobyte-dashboards
+# (Apache-2.0) at 95e028475ad12812b48902dfb9a7ac01813e4369. One local change:
+# the Performance dashboard's 15 panels pinned to Quobyte's own datasource UID
+# (UpqnkB9Gz) now use the ${ds} variable like everything else.
+#
+# quobyte-filer.json is ours, not upstream: the filer view the upstream set
+# lacks (client read/write IOPS and latency, fsync, metadata ops by type,
+# device latency, S3 and API at L7 via Hubble).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: monitoring
+
+generatorOptions:
+  disableNameSuffixHash: true
+  labels:
+    grafana_dashboard: "1"
+  annotations:
+    grafana_folder: Quobyte
+
+configMapGenerator:
+  - name: dashboard-quobyte-filer
+    files: [dashboards/quobyte-filer.json]
+  - name: dashboard-quobyte-overview
+    files: [dashboards/quobyte-overview.json]
+  - name: dashboard-quobyte-performance
+    files: [dashboards/quobyte-performance.json]
+  - name: dashboard-quobyte-availability
+    files: [dashboards/quobyte-availability.json]
+
+resources:
+  - httproute-grafana.yaml

@@ -1,0 +1,39 @@
+# Four volumes rather than one, so File Query Engine / MCP questions like
+# "usage per volume" have more than one answer. Each PVC becomes a Quobyte
+# volume named after its PV (pvc-<uid>).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: training
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: quobyte
+  resources: { requests: { storage: 5Gi } }
+---
+# Also published as the S3 bucket `lake` by install_play.sh.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: lake
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: quobyte
+  resources: { requests: { storage: 5Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: home
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: quobyte
+  resources: { requests: { storage: 5Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: scratch
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: quobyte
+  resources: { requests: { storage: 5Gi } }

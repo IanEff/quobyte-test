@@ -1,0 +1,20 @@
+# The quobyte-cluster 0.3.0 chart's own `quobyte-s3` Service targets port 80,
+# but the same chart sets QUOBYTE_S3_PORT=8484 and 5.1 honors it (4.9 seems to
+# have bound 80 regardless, which hid the mismatch). The chart has no knob for
+# the Service's targetPort, so we own a correct one and route to it instead.
+apiVersion: v1
+kind: Service
+metadata:
+  name: quobyte-s3-gw
+  namespace: quobyte
+  labels:
+    app: quobyte-s3
+spec:
+  type: ClusterIP
+  selector:
+    app: quobyte-s3
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8484
+      protocol: TCP

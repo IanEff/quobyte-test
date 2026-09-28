@@ -1,0 +1,42 @@
+# grafana-community/grafana (the grafana/grafana chart is deprecated).
+# Reachable at http://grafana.quobyte-test.lab through the Gateway, which is
+# firewalled to your IP. Anonymous viewers get Viewer; admin/admin to edit.
+adminUser: admin
+adminPassword: admin
+
+grafana.ini:
+  auth.anonymous:
+    enabled: true
+    org_role: Viewer
+  server:
+    root_url: http://grafana.quobyte-test.lab
+
+persistence:
+  enabled: false
+
+resources:
+  requests: { cpu: 50m, memory: 128Mi }
+  limits: { memory: 512Mi }
+
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        uid: prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus-server.monitoring.svc
+        isDefault: true
+
+# Dashboards arrive as ConfigMaps labeled grafana_dashboard: Quobyte's own
+# (quobyte/observability/kustomization.yaml) and Cilium/Hubble's (from
+# cilium/values-observability.yaml).
+sidecar:
+  dashboards:
+    enabled: true
+    label: grafana_dashboard
+    searchNamespace: ALL
+    folderAnnotation: grafana_folder
+    provider:
+      foldersFromFilesStructure: true

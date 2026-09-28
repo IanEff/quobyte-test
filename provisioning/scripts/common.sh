@@ -4,6 +4,10 @@
 # Sets up kernel modules, sysctls (including Quobyte network buffers), and packages.
 set -euo pipefail
 
+# Before the done-marker check: ntp.sh is idempotent and should hold on
+# every boot, not just the first.
+bash "$(dirname "${BASH_SOURCE[0]}")/ntp.sh"
+
 if [ -f /etc/quobyte-test-common.done ]; then
     echo "[common.sh] Already provisioned, skipping."
     exit 0

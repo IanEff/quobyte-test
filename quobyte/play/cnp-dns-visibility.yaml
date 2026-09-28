@@ -1,0 +1,25 @@
+# Same idea for the play clients: DNS visibility. Their S3 calls already
+# show up at L7 on the S3 gateway's ingress above, so a second Envoy hop on
+# the client side would only add latency.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: play-dns-visibility
+  namespace: quobyte-play
+spec:
+  endpointSelector: {}
+  enableDefaultDeny:
+    ingress: false
+    egress: false
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - { port: "53", protocol: UDP }
+            - { port: "53", protocol: TCP }
+          rules:
+            dns:
+              - matchPattern: "*"

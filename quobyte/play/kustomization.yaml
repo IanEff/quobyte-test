@@ -1,0 +1,21 @@
+# The play clients. install_play.sh applies this after creating the
+# namespace and the s3-credentials Secret, then publishes the `lake` volume
+# as an S3 bucket.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: quobyte-play
+
+resources:
+  - namespace.yaml
+  - cnp-dns-visibility.yaml
+  - pvcs.yaml
+  - workloads.yaml
+
+configMapGenerator:
+  - name: play-scripts
+    files:
+      - scripts/trainer.py
+      - scripts/evaluator.py
+      - scripts/crossproto.py
+      - scripts/metastorm.py
+      - scripts/datagen.py

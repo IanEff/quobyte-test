@@ -1,0 +1,46 @@
+# Visibility, not enforcement. `enableDefaultDeny: false` both ways means
+# these rules only add observation: nothing that flows today gets dropped.
+# What they buy in Hubble:
+#   - L7 HTTP on the three HTTP front doors (method, path, status, latency),
+#     plus the httpV2 RED metrics in Grafana.
+#   - DNS names on every lookup the Quobyte services make.
+# Quobyte's own RPC (786x, TCP and UDP) isn't HTTP, so it stays L4. Hubble
+# already sees those flows without a policy.
+#
+# Port map (from `ss -lntu` in each pod, Quobyte 5.1):
+#   registry 7861  metadata 7862  data 7863  s3 rpc 7864  api rpc 7865
+#   webconsole rpc 7866; HTTP status/metrics = rpc+10 (7871..7876)
+#   api JSON-RPC + /mcp 7860, S3 HTTP 8484, webconsole UI 8080, client 55000
+# The status ports are deliberately *not* L7: Prometheus scrapes them every
+# 30s and thump-test saw Envoy push scrapes into timeouts on small nodes.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: quobyte-l7-visibility
+  namespace: quobyte
+spec:
+  endpointSelector: {}
+  enableDefaultDeny:
+    ingress: false
+    egress: false
+  ingress:
+    - fromEntities: [all]
+      toPorts:
+        - ports:
+            - { port: "7860", protocol: TCP }   # API: qmgmt, CSI provisioner, webconsole, /mcp
+            - { port: "8484", protocol: TCP }   # S3 gateway
+            - { port: "8080", protocol: TCP }   # webconsole
+          rules:
+            http: [{}]
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            io.kubernetes.pod.namespace: kube-system
+            k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - { port: "53", protocol: UDP }
+            - { port: "53", protocol: TCP }
+          rules:
+            dns:
+              - matchPattern: "*"

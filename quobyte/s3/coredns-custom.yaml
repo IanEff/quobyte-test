@@ -1,0 +1,13 @@
+# The S3 gateway reads any Host header other than its configured hostname
+# (QUOBYTE_S3_HOSTNAME, s3.quobyte-test.lab) as a virtual-host bucket name, so
+# `http://quobyte-s3-gw.quobyte.svc` fails with NoSuchBucket. Resolve the real
+# hostname inside the cluster instead. k3s's CoreDNS imports `*.override` keys
+# from this optional ConfigMap into its main server block.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns-custom
+  namespace: kube-system
+data:
+  quobyte-s3.override: |
+    rewrite name exact s3.quobyte-test.lab quobyte-s3-gw.quobyte.svc.cluster.local

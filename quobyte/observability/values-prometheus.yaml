@@ -1,0 +1,66 @@
+# prometheus-community/prometheus, trimmed to server + node-exporter.
+alertmanager:
+  enabled: false
+prometheus-pushgateway:
+  enabled: false
+kube-state-metrics:
+  enabled: false
+prometheus-node-exporter:
+  enabled: true
+
+server:
+  retention: 3d
+  persistentVolume:
+    size: 8Gi
+  resources:
+    requests: { cpu: 100m, memory: 512Mi }
+    limits: { memory: 1536Mi }
+  global:
+    scrape_interval: 30s
+    scrape_timeout: 20s
+
+# Quobyte's own example config (github.com/quobyte/quobyte-dashboards) finds
+# targets through the registry's Consul-compatible catalog on :7871. On this
+# cluster that endpoint hangs, so use pod discovery instead and rebuild the
+# labels the dashboards key on: quobyte_cluster, service_type, instance.
+# Every service serves unauthenticated metrics at /prometheus on its HTTP
+# status port (RPC port + 10); clients serve them on 55000.
+extraScrapeConfigs: |
+  - job_name: quobyte
+    metrics_path: /prometheus
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [quobyte]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_phase]
+        regex: Running
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_label_app, __meta_kubernetes_pod_label_role]
+        regex: 'quobyte-(reg|meta|data|api|s3|web);.*|;client'
+        action: keep
+      # service_type values match what the upstream dashboards filter on.
+      - { source_labels: [__meta_kubernetes_pod_label_app], regex: quobyte-reg,  target_label: service_type, replacement: quobyte-registry }
+      - { source_labels: [__meta_kubernetes_pod_label_app], regex: quobyte-meta, target_label: service_type, replacement: quobyte-metadata }
+      - { source_labels: [__meta_kubernetes_pod_label_app], regex: quobyte-data, target_label: service_type, replacement: quobyte-data }
+      - { source_labels: [__meta_kubernetes_pod_label_app], regex: quobyte-api,  target_label: service_type, replacement: quobyte-api }
+      - { source_labels: [__meta_kubernetes_pod_label_app], regex: quobyte-s3,   target_label: service_type, replacement: quobyte-s3 }
+      - { source_labels: [__meta_kubernetes_pod_label_app], regex: quobyte-web,  target_label: service_type, replacement: quobyte-webconsole }
+      - { source_labels: [__meta_kubernetes_pod_label_role], regex: client,      target_label: service_type, replacement: quobyte-client }
+      - { source_labels: [__meta_kubernetes_pod_ip, service_type], regex: '(.+);quobyte-registry',   target_label: __address__, replacement: '$1:7871' }
+      - { source_labels: [__meta_kubernetes_pod_ip, service_type], regex: '(.+);quobyte-metadata',   target_label: __address__, replacement: '$1:7872' }
+      - { source_labels: [__meta_kubernetes_pod_ip, service_type], regex: '(.+);quobyte-data',       target_label: __address__, replacement: '$1:7873' }
+      - { source_labels: [__meta_kubernetes_pod_ip, service_type], regex: '(.+);quobyte-s3',         target_label: __address__, replacement: '$1:7874' }
+      - { source_labels: [__meta_kubernetes_pod_ip, service_type], regex: '(.+);quobyte-api',        target_label: __address__, replacement: '$1:7875' }
+      - { source_labels: [__meta_kubernetes_pod_ip, service_type], regex: '(.+);quobyte-webconsole', target_label: __address__, replacement: '$1:7876' }
+      - { source_labels: [__meta_kubernetes_pod_ip, service_type], regex: '(.+);quobyte-client',     target_label: __address__, replacement: '$1:55000' }
+      - { source_labels: [__meta_kubernetes_pod_name], target_label: instance }
+      - { source_labels: [__meta_kubernetes_pod_node_name], target_label: node }
+      - { target_label: quobyte_cluster, replacement: quobyte-test }
+    metric_relabel_configs:
+      # Same drops as upstream: executor series are debug-only and memory
+      # hungry. Upstream also drops roundtrip latency histograms; kept here
+      # because the cluster is tiny and they're the interesting part.
+      - source_labels: [executor]
+        regex: '.+'
+        action: drop
